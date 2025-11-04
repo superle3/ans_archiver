@@ -1,61 +1,113 @@
 import asyncio
 from collections.abc import Callable, Coroutine
+import json
+from logging import warning
 from pprint import pprint
-import subprocess
-from typing import cast
+from typing import Literal, cast
 import aiohttp
+from color_parser_py import ColorParser
 from colorama import Fore, init
 import requests
 import dotenv
 import bs4
 from yarl import URL
 from pathlib import Path
+import fitz
+import argparse
+from throttledclientsession import RateLimitMiddleware
 
 init(autoreset=True)
 config = dotenv.dotenv_values()
-if isinstance(temp := config.get("ANS_TOKEN"), str):
-    ANS_TOKEN: str = temp.split(";")[0]
+
+parser = argparse.ArgumentParser(description="Archive submissions from ANS platform.")
+parser.add_argument(
+    "--year",
+    type=str,
+    help="Year of the courses to archive (e.g., '2023', 'latest', 'all'). Defaults to 'latest'.",
+    default=config.get("YEAR", "latest"),
+)
+parser.add_argument(
+    "--base-path",
+    type=str,
+    help="Base path to save the archived submissions. Defaults to './archive'.",
+    default=str(Path.cwd() / "archive"),
+)
+parser.add_argument(
+    "--ans-token",
+    type=str,
+    help="ANS session token for authentication.",
+    default=config.get("ANS_TOKEN", ""),
+)
+
+
+class Arguments:
+    base_path: str
+    ans_token: str
+    year: str | Literal["latest", "all"]
+
+
+args = parser.parse_args(namespace=Arguments())
+if args.ans_token:
+    ANS_TOKEN: str = args.ans_token
 else:
     raise ValueError("ANS_TOKEN not found in environment variables")
-if isinstance(temp := config.get("COURSES_URL"), str):
-    COURSES_URL: str = temp
-else:
-    raise ValueError("COURSES_URL not found in environment variables")
-if isinstance(temp := config.get("BASE_PATH"), str):
-    BASE_PATH: Path = Path(temp)
-else:
-    BASE_PATH = Path.cwd() / "archive"
+BASE_PATH: Path = Path(args.base_path)
+if args.year not in ["latest", "all"] and not args.year.isdigit():
+    raise ValueError("Year must be 'latest', 'all' or a specific year like '2023'.")
+YEAR: str = args.year
 
 
-session = requests.Session()
+class Session(requests.Session):
+    def get(self, url: str | URL, *args, **kwargs) -> requests.Response:
+        return super().get(str(url), *args, **kwargs)
+
+
+session = Session()
 
 BASE_URL = URL("https://ans.app/")
-FULL_URL = BASE_URL / COURSES_URL
 # Add the authorization cookie
 session.cookies.set("__Host-ans_session", ANS_TOKEN, domain="ans.app")
 
 
 def main():
-    id = 302170978
-    url = FULL_URL / "471949/assignments/1136832/grading/view"
-    course_urls = get_list_of_courses(FULL_URL)
+    try:
+        url = get_navigation()
+        if YEAR != "latest" and YEAR != "all":
+            url = url.with_query({"q": f"year:{YEAR}"})
+        elif YEAR == "all":
+            url = url.with_query({})
+        print(f"Using courses URL: {url}")
+    except ValueError as e:
+        print(
+            Fore.RED
+            + f"Your ANS_TOKEN probably expired, please update it, for the actual error see: {str(e)}"
+        )
+        return
+    courses_url = url.relative().with_query({})
+    course_urls = get_list_of_courses(url, courses_url)
     if not course_urls:
         print("No courses found.")
         return
 
     async def gather_assignments():
         nonlocal course_urls
-        print(f"Found {len(course_urls)} courses.")
-        async with aiohttp.ClientSession() as async_session:
+        nonlocal courses_url
+        throttle_middleware = RateLimitMiddleware(rate_limit=10, jitter_factor=0)
+        async with aiohttp.ClientSession(
+            middlewares=[throttle_middleware]
+        ) as async_session:
             async_session.cookie_jar.update_cookies(
                 {"__Host-ans_session": ANS_TOKEN}, response_url=BASE_URL
             )
             await asyncio.gather(
                 *[
-                    get_assignments_from_course(course_url, async_session, BASE_PATH)
+                    get_assignments_from_course(
+                        course_url, async_session, courses_url, BASE_PATH
+                    )
                     for course_url in course_urls
                 ]
             )
+        print(throttle_middleware.get_stats())
 
     asyncio.run(gather_assignments())
 
@@ -63,23 +115,22 @@ def main():
 async def get_assignments_from_course(
     url: URL,
     async_session: aiohttp.ClientSession,
-    base_path: Path | None = None,
+    courses_url: URL,
+    base_path: Path,
 ) -> None:
-    if base_path is None:
-        base_path = Path.cwd()
-    results = await async_session.get(str(url))
+    results = await async_session.get(url)
     content = await results.text()
     html_soup = bs4.BeautifulSoup(content, "html.parser")
-    hrefs = [
-        a["href"]
+    hrefs: list[URL] = [
+        URL(href)
         for a in html_soup.find_all("a")
-        if isinstance(href := a.get("href", ""), str)
-        and href.startswith("/" + COURSES_URL)
+        if isinstance(href := a.get("href"), str)
+        and href.startswith(str(courses_url))
         and href.endswith("go_to")
     ]
 
     assignments = await asyncio.gather(
-        *[async_session.get(BASE_URL.join(URL(href))) for href in hrefs]
+        *[async_session.get(BASE_URL.join(href)) for href in hrefs]
     )
     assignment_texts = await asyncio.gather(*[a.text() for a in assignments])
 
@@ -87,10 +138,9 @@ async def get_assignments_from_course(
     for i, assignment_content in enumerate(assignment_texts):
         assignment_soup = bs4.BeautifulSoup(assignment_content, "html.parser")
         assignment_results = [
-            a["href"]
+            URL(href)
             for a in assignment_soup.find_all("a")
-            if isinstance(href := a.get("href", ""), str)
-            and href.startswith("/results/")
+            if isinstance(href := a.get("href"), str) and href.startswith("/results/")
         ]
         if not assignment_results:
             print("No assignment links found.")
@@ -103,7 +153,7 @@ async def get_assignments_from_course(
         course_name_refs = [
             a
             for a in assignment_soup.find_all("a")
-            if isinstance(href := a.get("href", ""), str)
+            if isinstance(href := a.get("href"), str)
             and href.startswith("/" + url.path.removeprefix(BASE_URL.path).lstrip("/"))
         ]
         if not course_name_refs:
@@ -112,7 +162,7 @@ async def get_assignments_from_course(
         elif len(course_name_refs) > 1:
             # print("Multiple course name references found, taking the first one.")
             pass
-        course_name_ref: bs4.BeautifulSoup = course_name_refs[0]
+        course_name_ref: bs4.element.Tag = course_name_refs[0]
         course_name_span: bs4.element.Tag | None = course_name_ref.find_next("span")
         if not isinstance(course_name_span, bs4.element.Tag):
             print("No course name span found.")
@@ -133,7 +183,7 @@ async def get_assignments_from_course(
         course_path = base_path / sanitize_filename(course_name)
         submission_path = course_path / sanitize_filename(submission_name)
         submission_tasks[i] = get_submission(
-            BASE_URL.join(URL(assignment_result)), submission_path, async_session
+            BASE_URL.join(assignment_result), submission_path, async_session
         )
     await asyncio.gather(*[task for task in submission_tasks if task is not None])
 
@@ -155,23 +205,23 @@ async def get_assignments_from_course(
 async def get_submission(
     url: URL, submission_path: Path, async_session: aiohttp.ClientSession
 ) -> None:
-    # print(f"Getting submission from {url}")
     result = await async_session.get(str(url))
     content = await result.text()
     html_soup = bs4.BeautifulSoup(content, "html.parser")
     submission_links = [
-        URL(a["href"])
+        URL(href)
         for a in html_soup.find_all("a")
-        if (href := a.get("href"))
-        and isinstance(href, str)
-        and href.find("/grading/view") != -1
+        if isinstance(href := a.get("href"), str) and href.find("/grading/view") != -1
     ]
     if not submission_links:
         # There are no results so we don't have to download this one.
-        print(Fore.YELLOW + f"No submission links found. {url = } {submission_path = }")
+        print(
+            Fore.YELLOW
+            + f"No submission links found, url: {url} for assignment {submission_path.relative_to(BASE_PATH)}"
+        )
         return
 
-    # Multiple liinks are expected, I think one for each question but not sure.
+    # Multiple links are expected, I think one for each question but not sure.
     # elif len(submission_links) > 1:
     #     print("Multiple submission links found, taking the first one.")
     submission_link = submission_links[0]
@@ -187,24 +237,24 @@ async def get_answers(
     await download_answers(url_with_no_id, id, path, async_session)
 
 
-def get_list_of_courses(url: URL) -> list[URL]:
+def get_list_of_courses(url: URL, courses_url: URL) -> list[URL]:
     courses_list: list[URL] = []
     while True:
-        result = session.get(str(url))
+        result = session.get(url)
         content = result.text
 
         html_soup = bs4.BeautifulSoup(content, "html.parser")
         courses: list[URL] = [
-            BASE_URL / a["href"].lstrip("/")
+            BASE_URL / href.lstrip("/")
             for a in html_soup.find_all("a")
-            if isinstance(a.get("href", ""), str)
-            and a.get("href", "").startswith("/routing/courses/")
+            if isinstance(href := a.get("href"), str)
+            and href.startswith("/routing/courses/")
         ]
         next_page = [
-            BASE_URL.join(URL(a["href"]))
+            BASE_URL.join(URL(href))
             for a in html_soup.find_all("a")
-            if (href := a.get("href", ""))
-            and href.startswith("/" + COURSES_URL.rstrip("/"))
+            if isinstance(href := a.get("href"), str)
+            and href.startswith(str(courses_url))
             and cast(str, a.text).strip().lower().find("show more") != -1
         ]
         print(f"Found {len(courses)} courses on page {url}.")
@@ -216,17 +266,27 @@ def get_list_of_courses(url: URL) -> list[URL]:
     return courses_list
 
 
-def get_navigation(url: URL) -> None:
-    raise NotImplementedError(
-        "Function not implemented yet, don't know how to extract the courses navigation."
-    )
-    result = session.get(str(url))
+def get_navigation() -> URL:
+    result = session.get(BASE_URL)
     content = result.text
 
     html_soup = bs4.BeautifulSoup(content, "html.parser")
-    with open("navigation.html", "w", encoding="utf-8") as f:
-        f.write(html_soup.prettify())
-    subprocess.run(["start", "navigation.html"], shell=True)
+    navigation_link = [
+        BASE_URL.join(URL(href))
+        for a in html_soup.find_all("a")
+        if isinstance(href := a.get("href"), str)
+        and href.find("courses") != -1
+        and href.find("routing") == -1
+        and not href.startswith("https://")
+    ]
+    if not navigation_link:
+        raise ValueError("No navigation link found.")
+    if len(navigation_link) > 1:
+        warning(Fore.YELLOW + "Multiple navigation links found, taking the first one.")
+    navigation_url = navigation_link[0]
+    # .with_query({})
+    # navigation_url = navigation_link[0]
+    return navigation_url
 
 
 async def download_submission(
@@ -270,22 +330,49 @@ async def download_submission(
             f.write(str(html_soup.prettify()))
         return
 
+    async def get_annotations_from_html(url: URL) -> dict:
+        annotation_html = html_soup.find(
+            "button", attrs={"data-pages-with-annotations": True, "data-url": str(url)}
+        )
+        if annotation_html is None:
+            return {"content": []}
+
+        pages_with_annotations = json.loads(
+            cast(str, annotation_html["data-pages-with-annotations"])
+        )
+        if not pages_with_annotations:
+            return {"content": []}
+        data_upload_id = annotation_html["data-upload-id"]
+        annotation_response = await async_session.get(
+            BASE_URL / f"uploads/{data_upload_id}/annotations"
+        )
+        try:
+            annotation_data = await annotation_response.json()
+        except aiohttp.ContentTypeError as e:
+            print(
+                Fore.RED
+                + f"Failed to get annotations JSON\n for Path: {path}\n for: upload ID {data_upload_id}:\n\n {str(e)}"
+            )
+            return {"content": []}
+        return annotation_data
+
     async def download_pdf(url: URL, path: Path) -> None:
         pdf_file = await async_session.get(url)
         filename = sanitize_filename(url.query.get("filename", "faulty_name.pdf"))
         path.mkdir(parents=True, exist_ok=True)
-        print(Fore.BLUE + f"Starting Downloading PDF: {filename} from {url}")
-        with (path / filename).open("wb") as f:
-            while True:
-                chunk = await pdf_file.content.readany()
-                if not chunk:
-                    break
-                f.write(chunk)
-        print(Fore.GREEN + f"Downloaded PDF: {filename}")
+        pdf_path = path / filename
+        content = await pdf_file.read()
+        pdf_document = fitz.Document(stream=content, filetype="pdf")
+        annotation_data = await get_annotations_from_html(url)
+        annotate_pdf(pdf_document, annotation_data, html_soup, pdf_path)
+        print(Fore.GREEN + f"Downloaded PDF: {filename}: {pdf_path}")
 
     path.mkdir(parents=True, exist_ok=True)
     await asyncio.gather(
-        *[download_pdf(BASE_URL.join(URL(pdf_url)), path) for pdf_url in pdf_buttons]
+        *[
+            download_pdf(BASE_URL.join(URL(pdf_url, encoded=True)), path)
+            for pdf_url in pdf_buttons
+        ]
     )
     if not isinstance(attempt, bs4.element.Tag):
         return
@@ -301,6 +388,97 @@ async def download_submission(
     path.mkdir(parents=True, exist_ok=True)
     with (path / "attempt.html").open("w", encoding="utf-8") as f:
         f.write(str(new_html))
+
+
+def annotate_pdf(
+    doc: fitz.Document,
+    annotations_data: dict,
+    html_soup: bs4.BeautifulSoup,
+    pdf_path: Path,
+) -> None:
+    annotation_content = annotations_data["content"]
+    point_comments = [
+        annotation for annotation in annotation_content if annotation["type"] == "point"
+    ]
+    drawings = [
+        annotation
+        for annotation in annotation_content
+        if annotation["type"] == "drawing"
+    ]
+    the_rest = [
+        annotation
+        for annotation in annotation_content
+        if annotation["type"] not in ("point", "drawing")
+    ]
+    if the_rest:
+        print(
+            "Some annotation types were not processed:",
+            [ann["type"] for ann in the_rest],
+        )
+    for comment in point_comments:
+        turbo_frame = html_soup.find(
+            "turbo-frame", attrs={"id": f"annotation_{comment['uuid']}"}
+        )
+        if turbo_frame is None:
+            print(
+                Fore.RED
+                + f"Turbo-frame not found for annotation {comment['uuid']} in {pdf_path}. Skipping annotation."
+            )
+            continue
+        article = turbo_frame.find("article")
+        if article is None:
+            print(
+                Fore.RED
+                + f"Article not found in turbo-frame for annotation {comment['uuid']} in {pdf_path}. Skipping annotation."
+            )
+            continue
+        page_count: int = comment["page"]
+        if page_count > len(doc):
+            print(
+                Fore.RED
+                + f"Annotation page {page_count} exceeds document page count {len(doc)}. Skipping annotation.\n {pdf_path}"
+            )
+            continue
+        page = doc[page_count - 1]
+        point = fitz.Point(comment["x"], comment["y"])
+        annot = page.add_text_annot(point, article.text.strip())
+        annot.set_name("Comment")
+        info = annot.info
+        info["title"] = "Annotation from ANS"
+        annot.set_info(info)
+        annot.update()
+
+    # Process drawing annotations
+    for drawing in drawings:
+        page_num: int = drawing["page"]
+        if page_num > len(doc):
+            print(
+                Fore.RED
+                + f"Annotation page {page_num} exceeds document page count {len(doc)}. Skipping annotation.\n {pdf_path}"
+            )
+            continue
+        page = doc[page_num - 1]
+        lines: list[list[float]] = drawing["lines"]
+        try:
+            colors = ColorParser(drawing["color"]).rgba_float
+            color = colors[0:3]
+            opacity = colors[3] if len(colors) > 3 else 1.0
+        except ValueError:
+            print(f"Can't parse drawing color: {drawing['color']}")
+            # Default to black if color parsing fails
+            color = (0.0, 0.0, 0.9)
+            opacity = 1.0
+        width: int = drawing["width"]
+
+        # Draw lines by connecting consecutive points
+        for i in range(len(lines) - 1):
+            point1 = fitz.Point(*lines[i])
+            point2 = fitz.Point(*lines[i + 1])
+            page.draw_line(
+                point1, point2, color=color, width=width, stroke_opacity=opacity
+            )
+
+    doc.save(pdf_path)
 
 
 async def download_answers(
@@ -384,9 +562,10 @@ async def download_answers(
                 "POINTS",
                 "CRITERIA",
             ]
-            if set(comments_list).isdisjoint(known_comments):
-                print("Unknown comments found in grading panel:")
-                pprint(comments_list)
+            unknown_comments = set(comments_list).difference(known_comments)
+            if unknown_comments:
+                print(f"Unknown comments found in grading panel, url: {new_url}")
+                pprint(list(unknown_comments))
                 with open("unknown_comments.html", "w", encoding="utf-8") as f:
                     f.write(grading_panel.prettify())
 

@@ -10,6 +10,7 @@ wheels/
 .venv
 .env
 test-html
+test_pdf
 .python-version
 uv.lock
 archive/*

@@ -3,12 +3,23 @@ name = "ans-archiver"
 version = "0.1.0"
 description = "Web-scraper for downloading assignment submissions from the ANS (ans.app) assesment platform."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = "==3.12.*"
 dependencies = [
     "aiohttp>=3.13.1",
     "asyncio>=4.0.0",
     "bs4>=0.0.2",
+    "color-parser-py>=0.1.6",
+    "colorama>=0.4.6",
     "dotenv>=0.9.9",
+    "pymupdf>=1.26.5",
     "requests>=2.32.5",
     "yarl>=1.22.0",
+]
+
+[tool.pyright]
+exclude = ["archive", "test-html" ,"test_pdf", "images"]
+
+[dependency-groups]
+dev = [
+    "debugpy>=1.8.17",
 ]
