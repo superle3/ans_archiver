@@ -3,7 +3,7 @@ from collections.abc import Callable
 import json
 import logging
 from pprint import pprint
-from typing import cast
+from typing import NamedTuple, cast
 import aiohttp
 from color_parser_py import ColorParser
 from colorama import Fore
@@ -59,27 +59,10 @@ async def download_submission(
     text: str, path: Path, async_session: aiohttp.ClientSession
 ) -> None:
     html_soup = bs4.BeautifulSoup(text, "html.parser")
-    new_html = bs4.BeautifulSoup(
-        """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-</head>
-<body>
-<main></main>
-</body>
-</html>
-    """,
-        "html.parser",
-    )
-    head_tag = cast(bs4.element.Tag, new_html.find("head"))
-    head_tag.clear()
-    head_tag.extend(cast(bs4.element.Tag, html_soup.find("head")).contents)
-
-    body_tag: bs4.element.Tag = cast(bs4.element.Tag, new_html.find("body"))
-    main_tag: bs4.element.Tag = cast(bs4.element.Tag, new_html.find("main"))
-    original_body_tag = cast(bs4.element.Tag, html_soup.find("body"))
-    body_tag.attrs = original_body_tag.attrs
+    new_html_page = create_answer_html(html_soup)
+    main_tag = new_html_page.main
+    body_tag = new_html_page.body
+    new_html = new_html_page.page
     attempt = html_soup.find(
         "div", attrs={"data-current-user-id": True, "data-assignment-id": True}
     )
@@ -114,7 +97,7 @@ async def download_submission(
         )
         try:
             annotation_data = await annotation_response.json()
-        except aiohttp.ContentTypelogger.Error as e:
+        except aiohttp.ContentTypeError as e:
             logger.error(
                 Fore.RED
                 + f"Failed to get annotations JSON\n for Path: {path}\n for: upload ID {data_upload_id}:\n\n {str(e)}"
@@ -214,6 +197,80 @@ def annotate_pdf(
         annot.set_info(info)
         annot.update()
 
+    # Process drawing annotations
+    for drawing in drawings:
+        page_num: int = drawing["page"]
+        if page_num > len(doc):
+            print(
+                Fore.RED
+                + f"Annotation page {page_num} exceeds document page count {len(doc)}. Skipping annotation.\n {pdf_path}"
+            )
+            continue
+        page = doc[page_num - 1]
+        lines: list[list[float]] = drawing["lines"]
+        try:
+            colors = ColorParser(drawing["color"]).rgba_float
+            color = colors[0:3]
+            opacity = colors[3] if len(colors) > 3 else 1.0
+        except ValueError:
+            print(f"Can't parse drawing color: {drawing['color']}")
+            # Default to black if color parsing fails
+            color = (0.0, 0.0, 0.9)
+            opacity = 1.0
+        width: int = drawing["width"]
+
+        # Draw lines by connecting consecutive points
+        for i in range(len(lines) - 1):
+            point1 = fitz.Point(*lines[i])
+            point2 = fitz.Point(*lines[i + 1])
+            page.draw_line(
+                point1, point2, color=color, width=width, stroke_opacity=opacity
+            )
+
+    doc.save(pdf_path)
+
+
+class AnswerHtml(NamedTuple):
+    html: bs4.Tag
+    body: bs4.Tag
+    main: bs4.Tag
+    head: bs4.Tag
+    page: bs4.BeautifulSoup
+
+
+def create_answer_html(html_soup: bs4.BeautifulSoup) -> AnswerHtml:
+    html_page = bs4.BeautifulSoup("<!DOCTYPE html>", "html.parser")
+    html_tag = html_page.new_tag("html", lang="en")
+    head_tag = html_page.new_tag("head")
+    body_tag = html_page.new_tag("body")
+    main_tag = html_page.new_tag("main")
+
+    html_page.append(html_tag)
+    html_tag.append(head_tag)
+    html_tag.append(body_tag)
+    body_tag.append(main_tag)
+
+    original_head_tag = html_soup.find("head")
+    if not isinstance(original_head_tag, bs4.element.Tag):
+        logger.warning(
+            "Javascript and css assets not found, page may not render correctly."
+        )
+    else:
+        head_tag.clear()
+        head_tag.extend(original_head_tag.contents)
+
+    original_body_tag = html_soup.find("body")
+    if isinstance(original_body_tag, bs4.element.Tag):
+        body_tag.attrs = original_body_tag.attrs
+    else:
+        logger.warning(
+            "body tag not found, attributes may be missing and page may not render correctly."
+        )
+
+    return AnswerHtml(
+        html=html_page, body=body_tag, main=main_tag, head=head_tag, page=html_page
+    )
+
 
 async def download_answers(
     url: URL, id: int, path: Path, async_session: aiohttp.ClientSession
@@ -237,33 +294,10 @@ async def download_answers(
         "SUBQUESTION": parse_sub_question,
         "GRADING DESCRIPTION": parse_criteria,
     }
-    new_html2 = bs4.BeautifulSoup("<!DOCTYPE html>")
-    html_tag = new_html2.new_tag("html", lang="en")
-    logger.info(new_html2.prettify())
-
-    new_html = bs4.BeautifulSoup(
-        """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-</head>
-<body>
-<main></main>
-</body>
-</html>
-    """,
-        "html.parser",
-    )
-    html_tag = cast(bs4.element.Tag, new_html.find("html"))
-    head_tag = cast(bs4.element.Tag, new_html.find("head"))
-    head_tag.clear()
-    head_tag.extend(cast(bs4.element.Tag, html_soup.find("head")).contents)
-
-    body_tag: bs4.element.Tag = cast(bs4.element.Tag, new_html.find("body"))
-    main_tag = new_html.find("main")
-    original_body_tag = html_soup.find("body")
-    if isinstance(original_body_tag, bs4.element.Tag):
-        body_tag.attrs = original_body_tag.attrs
+    new_html_page = create_answer_html(html_soup)
+    body_tag = new_html_page.body
+    main_tag = new_html_page.main
+    html_tag = new_html_page.html
 
     results = [async_session.get(str(url / str(qid))) for qid in question_links]
     responses = await asyncio.gather(*results)
@@ -317,7 +351,7 @@ async def download_answers(
     html_tag.append(body_tag)
     path.mkdir(parents=True, exist_ok=True)
     with (path / "grading_panel.html").open("w", encoding="utf-8") as f:
-        f.write(str(new_html.prettify()))
+        f.write(str(new_html_page.page.prettify()))
     await asyncio.gather(*tasks)
 
 

@@ -34,7 +34,10 @@ def main():
         url = url.with_query({})
     logger.info(f"Using courses URL: {url}")
     courses_url = url.relative().with_query({})
-    course_urls = get_list_of_courses(url, courses_url)
+    # course_urls = get_list_of_courses(url, courses_url)
+    course_urls = [
+        CourseInfo(name="2mbc30", url=URL("https://ans.app/routing/courses/569252"))
+    ]
     if not course_urls:
         logger.error("No courses found.")
         return
@@ -115,12 +118,15 @@ async def get_assignments_from_course(
             if isinstance(href := a.get("href"), str) and href.startswith("/results/")
         ]
         if not assignment_results:
-            logger.warning(f"No assignment links found for {courses_url}.")
+            logger.warning(
+                f"No assignment links found for {info.course_name}:{info.assignment_name} and url was: {info.url}. Skipping."
+            )
             with open("no_submission_link.html", "w", encoding="utf-8") as f:
                 f.write(str(assignment_soup.prettify()))
             continue
 
         assignment_result = assignment_results[0]
+        logger.debug(BASE_URL.join(assignment_result))
         course_path = base_path / sanitize_filename(info.course_name)
         submission_path = course_path / sanitize_filename(info.assignment_name)
         submission_tasks[i] = get_submission(
