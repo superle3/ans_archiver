@@ -109,6 +109,9 @@ async def get_assignments_from_course(
     )
     assignment_texts = await asyncio.gather(*[a.text() for a in assignments])
     submission_tasks: list[None | Coroutine] = [None] * len(assignment_texts)
+    logger.debug(
+        f"Found {len(assignment_infos)} assignments for course {course_info.name}."
+    )
 
     for i, (content, info) in enumerate(zip(assignment_texts, assignment_infos)):
         assignment_soup = bs4.BeautifulSoup(content, "html.parser")

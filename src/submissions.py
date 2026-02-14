@@ -15,7 +15,7 @@ import fitz
 from .utils import sanitize_filename
 from .parser import BASE_PATH, BASE_URL
 
-logger = logging.getLogger("ans_archive")
+logger = logging.getLogger("ans_archiver")
 
 
 async def get_submission(
@@ -258,6 +258,28 @@ def create_answer_html(html_soup: bs4.BeautifulSoup) -> AnswerHtml:
     else:
         head_tag.clear()
         head_tag.extend(original_head_tag.contents)
+    head_tag.append(
+        bs4.BeautifulSoup(
+            """
+                <style>
+                     body { 
+                         padding: 2rem; 
+                    }
+                    @media print {
+                            body {
+                                padding: 2cm;
+                            }
+                        }
+                    @media (max-width: 420px) {
+                        body {
+                            padding: 0 2rem;
+                        }
+                    }
+                </style>
+            """,
+            "html.parser",
+        )
+    )
 
     original_body_tag = html_soup.find("body")
     if isinstance(original_body_tag, bs4.element.Tag):
@@ -289,11 +311,6 @@ async def download_answers(
         await asyncio.gather(*tasks)
         return
 
-    parsing_dict = {
-        "CRITERIA": parse_criteria,
-        "SUBQUESTION": parse_sub_question,
-        "GRADING DESCRIPTION": parse_criteria,
-    }
     new_html_page = create_answer_html(html_soup)
     body_tag = new_html_page.body
     main_tag = new_html_page.main
@@ -305,41 +322,18 @@ async def download_answers(
 
     for page_content in fetched_pages:
         html_soup2 = bs4.BeautifulSoup(page_content, "html.parser")
-        grading: bs4.ResultSet = html_soup2.find_all(
-            "div", attrs={"data-js-grading-panel": True}
-        )
+        grading = html_soup2.find_all("div", attrs={"data-js-grading-panel": True})
+        is_v2 = False
+        if not grading:
+            grading = html_soup2.find_all("div", attrs={"data-js-review-panel": True})
+            is_v2 = True
         for grading_panel in grading:
-            # grading_panel: bs4.BeautifulSoup = grading_panel
-            comments = grading_panel.find_all(
-                string=lambda text: isinstance(text, bs4.Comment)
-            )
-            comments_list = []
-            for comment in comments:
-                comments_list.append(comment.strip())
-                comment_str: str = comment.strip()
-                if comment_str not in parsing_dict:
-                    continue
-                parse_function: Callable[..., bs4.BeautifulSoup] = parsing_dict[
-                    comment_str
-                ]
-                parsed_data: bs4.BeautifulSoup = parse_function(
-                    comment.find_next_sibling()
-                )
-                main_tag.append(parsed_data)
-            known_comments = [
-                "QUESTION",
-                "SUBQUESTION",
-                "GRADING DESCRIPTION",
-                "OBJECTIVES",
-                "POINTS",
-                "CRITERIA",
-            ]
-            unknown_comments = set(comments_list).difference(known_comments)
-            if unknown_comments:
-                logger.info(f"Unknown comments found in grading panel, url: {new_url}")
-                pprint(list(unknown_comments))
-                with open("unknown_comments.html", "w", encoding="utf-8") as f:
-                    f.write(grading_panel.prettify())
+            if is_v2:
+                logger.debug("Using grading scheme v2 for url: " + str(new_url))
+                grading_scheme_v2(main_tag, grading_panel, html_soup2)
+                continue
+
+            grading_scheme_v1(main_tag, grading_panel, new_url)
 
     body_tag.append(main_tag)
     body_tag.append(
@@ -353,6 +347,98 @@ async def download_answers(
     with (path / "grading_panel.html").open("w", encoding="utf-8") as f:
         f.write(str(new_html_page.page.prettify()))
     await asyncio.gather(*tasks)
+
+
+def grading_scheme_v1(main_tag: bs4.Tag, grading_panel: bs4.Tag, new_url: URL) -> None:
+    parsing_dict = {
+        "CRITERIA": parse_criteria,
+        "SUBQUESTION": parse_sub_question,
+        "GRADING DESCRIPTION": parse_criteria,
+    }
+    comments = grading_panel.find_all(string=lambda text: isinstance(text, bs4.Comment))
+    comments_list = []
+    for comment in comments:
+        comments_list.append(comment.strip())
+        comment_str: str = comment.strip()
+        if comment_str not in parsing_dict:
+            continue
+        parse_function: Callable[..., bs4.BeautifulSoup] = parsing_dict[comment_str]
+        parsed_data: bs4.BeautifulSoup = parse_function(comment.find_next_sibling())
+        main_tag.append(parsed_data)
+
+    adjustments = grading_panel.find(attrs={"data-js-adjustments-wrapper": True})
+    if adjustments:
+        main_tag.append(adjustments)
+    known_comments = [
+        "QUESTION",
+        "SUBQUESTION",
+        "GRADING DESCRIPTION",
+        "OBJECTIVES",
+        "SLIDER",
+        "POINTS",
+        "CRITERIA",
+    ]
+    unknown_comments = set(comments_list).difference(known_comments)
+    if unknown_comments:
+        logger.info(f"Unknown comments found in grading panel, url: {new_url}")
+        pprint(list(unknown_comments))
+        with open("unknown_comments.html", "w", encoding="utf-8") as f:
+            f.write(grading_panel.prettify())
+
+
+def grading_scheme_v2(
+    main_tag: bs4.Tag, grading_panel: bs4.Tag, full_page: bs4.BeautifulSoup
+) -> None:
+    for element_id in ["question-header", "subquestion-header", "criteria"]:
+        element = grading_panel.find(id=element_id)
+        if not element:
+            continue
+        with open("test3.html", "w", encoding="utf-8") as f:
+            f.write(str(grading_panel.prettify()))
+        if element_id == "subquestion-header":
+            current_question = full_page.find(
+                "div", attrs={"class": "question-button-indicator"}
+            )
+            if current_question:
+                question_number = current_question.next_sibling
+                if question_number:
+                    number = question_number.text.strip()
+                    element.insert(
+                        0,
+                        bs4.BeautifulSoup(
+                            f'<div class="text-semi-bold mr-3"> {number} </div>'
+                        ),
+                    )
+        main_tag.append(element)
+
+    none_above = grading_panel.find("div", attrs={"data-controller": "score"})
+    if none_above:
+        # Optional: Grab the separator too for visual consistency
+        separator = none_above.find_previous_sibling("div", class_="border-top")
+        if separator:
+            main_tag.append(separator)
+        main_tag.append(none_above)
+
+    adjustment_frame = grading_panel.find(
+        "turbo-frame", id=lambda x: isinstance(x, str) and x.startswith("adjustment_")
+    )
+    if adjustment_frame:
+        main_tag.append(adjustment_frame)
+    else:
+        adjustments_attr = grading_panel.find(
+            attrs={"data-js-adjustments-wrapper": True}
+        )
+        if adjustments_attr:
+            main_tag.append(adjustments_attr)
+
+    score_summary = grading_panel.find(class_="score-summary")
+    if not score_summary:
+        score_summary = grading_panel.find(
+            "turbo-frame",
+            id=lambda x: isinstance(x, str) and x.startswith("score_submission_"),
+        )
+    if score_summary:
+        main_tag.append(score_summary)
 
 
 def parse_sub_question(grading_panel: bs4.BeautifulSoup) -> bs4.BeautifulSoup:
