@@ -3,6 +3,7 @@ from collections.abc import Coroutine
 import logging
 from pathlib import Path
 import random
+import re
 from typing import NamedTuple, cast
 import aiohttp
 import bs4
@@ -29,7 +30,8 @@ def main():
         )
         return
     if YEAR != "latest" and YEAR != "all":
-        url = url.with_query({"q": f"year:{YEAR}"})
+        query_string = re.sub(r"=\d+$", f"={YEAR}", url.query_string)
+        url = url.with_query(query_string)
     elif YEAR == "all":
         url = url.with_query({})
     logger.info(f"Using courses URL: {url}")
