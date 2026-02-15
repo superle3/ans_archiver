@@ -38,6 +38,13 @@ parser.add_argument(
     help="Grading scheme to use when archiving (e.g., 'old', 'new', 'current'). Defaults to 'current'.",
     default=config.get("GRADING_SCHEME", "current"),
 )
+parser.add_argument(
+    "--log-level",
+    type=str,
+    choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL", "FATAL", "WARN"],
+    help="Logging level (e.g., 'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'). Defaults to 'INFO'.",
+    default=config.get("LOG_LEVEL", "INFO"),
+)
 
 type GradingScheme = Literal["old", "new", "current"]
 grading_schemes = get_args(GradingScheme.__value__)
@@ -48,6 +55,7 @@ class Arguments:
     ans_token: str
     year: str | Literal["latest", "all"]
     grading_scheme: GradingScheme = "current"
+    log_level: str
 
 
 def parse_ans_token(token: str) -> str:
@@ -63,14 +71,18 @@ args = parser.parse_args(namespace=Arguments())
 if args.ans_token:
     ANS_TOKEN = parse_ans_token(args.ans_token)
 else:
-    raise ValueError("ANS_TOKEN not found in environment variables")
+    raise ValueError(
+        f"ANS_TOKEN not found in environment variables, found {args.ans_token} and .env file was: {config}."
+    )
 BASE_PATH = Path(args.base_path)
 if args.year not in ["latest", "all"] and not args.year.isdigit():
-    raise ValueError("Year must be 'latest', 'all' or a specific year like '2023'.")
+    raise ValueError(
+        f"Year must be 'latest', 'all' or a specific year like '2023'. Actual value was: {args.year}. `.env` file was: {config}."
+    )
 YEAR = args.year
 if args.grading_scheme not in grading_schemes:
     raise ValueError(
-        f"Invalid grading scheme '{args.grading_scheme}'. Must be one of {grading_schemes}."
+        f"Invalid grading scheme '{args.grading_scheme}'. Must be one of {grading_schemes}. `.env` file was: {config}."
     )
 GRADING_SCHEME = args.grading_scheme
 
@@ -85,4 +97,4 @@ logger = logging.getLogger("ans_archiver")
 stream_handler = logging.StreamHandler(sys.stdout)
 stream_handler.setFormatter(logging.Formatter("%(levelname)s:%(message)s"))
 logger.addHandler(stream_handler)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging._nameToLevel[args.log_level.upper()])
