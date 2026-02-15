@@ -1,8 +1,9 @@
 import argparse
+from enum import Enum
 import logging
 import sys
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 import dotenv
 from yarl import URL
 from .utils import URLSession
@@ -30,11 +31,23 @@ parser.add_argument(
     default=config.get("ANS_TOKEN", ""),
 )
 
+parser.add_argument(
+    "--grading-scheme",
+    type=str,
+    choices=["old", "new", "current"],
+    help="Grading scheme to use when archiving (e.g., 'old', 'new', 'current'). Defaults to 'current'.",
+    default=config.get("GRADING_SCHEME", "current"),
+)
+
+type GradingScheme = Literal["old", "new", "current"]
+grading_schemes = get_args(GradingScheme.__value__)
+
 
 class Arguments:
     base_path: str
     ans_token: str
     year: str | Literal["latest", "all"]
+    grading_scheme: GradingScheme = "current"
 
 
 def parse_ans_token(token: str) -> str:
@@ -55,6 +68,11 @@ BASE_PATH = Path(args.base_path)
 if args.year not in ["latest", "all"] and not args.year.isdigit():
     raise ValueError("Year must be 'latest', 'all' or a specific year like '2023'.")
 YEAR = args.year
+if args.grading_scheme not in grading_schemes:
+    raise ValueError(
+        f"Invalid grading scheme '{args.grading_scheme}'. Must be one of {grading_schemes}."
+    )
+GRADING_SCHEME = args.grading_scheme
 
 
 SESSION = URLSession()

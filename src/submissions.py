@@ -13,7 +13,7 @@ from pathlib import Path
 import fitz
 
 from .utils import sanitize_filename
-from .parser import BASE_PATH, BASE_URL
+from .parser import BASE_PATH, BASE_URL, GRADING_SCHEME
 
 logger = logging.getLogger("ans_archiver")
 
@@ -37,6 +37,14 @@ async def get_submission(
             + f"No submission links found, url: {url} for assignment {submission_path.relative_to(BASE_PATH)}"
         )
         return
+    switch_to_old = GRADING_SCHEME == "old" and not html_soup.find(
+        "div", attrs={"data-js-review-panel": True}
+    )
+    switch_to_new = GRADING_SCHEME == "new" and not html_soup.find(
+        "div", attrs={"data-js-grading-panel": True}
+    )
+    if switch_to_old or switch_to_new:
+        await switch_grading_schemes(async_session, html_soup, url)
 
     # Multiple links are expected, I think one for each question but not sure.
     # elif len(submission_links) > 1:
@@ -465,3 +473,34 @@ def parse_criteria(grading_panel: bs4.BeautifulSoup) -> bs4.BeautifulSoup:
     # print("Parsing CRITERIA - function not yet implemented", grading_panel.prettify())
     # return grading_panel.find("article") or grading_panel
     return grading_panel
+
+
+async def switch_grading_schemes(
+    async_session: aiohttp.ClientSession,
+    html_soup: bs4.BeautifulSoup,
+    question_url: URL,
+) -> None:
+    response = await async_session.get(question_url)
+    text = await response.text()
+    html_soup = bs4.BeautifulSoup(text, "html.parser")
+    form = html_soup.find("form", attrs={"class": "button_to", "action": True})
+    if form is None:
+        logger.warning(
+            Fore.RED
+            + f"Grading scheme switch button not found on page: {question_url}. Cannot switch grading schemes."
+        )
+        return
+    action = form["action"]
+    input_el = form.find("input", attrs={"name": "authenticity_token"})
+    if (
+        input_el is None
+        or not input_el.has_attr("value")
+        or not isinstance(action, str)
+    ):
+        logger.warning(
+            Fore.RED
+            + f"Authenticity token input or action attribute not found in grading scheme switch button on page: {question_url}. Cannot switch grading schemes."
+        )
+        return
+    raw_body = {"authenticity_token": input_el["value"]}
+    await async_session.post(BASE_URL.join(URL(action)), data=raw_body)

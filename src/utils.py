@@ -8,6 +8,9 @@ class URLSession(requests.Session):
     def get(self, url: str | URL, *args, **kwargs) -> requests.Response:
         return super().get(str(url), *args, **kwargs)
 
+    def post(self, url: str | URL, *args, **kwargs) -> requests.Response:
+        return super().post(str(url), *args, **kwargs)
+
 
 def sanitize_filename(name: str) -> str:
     invalid_chars = ' <>:"/\\|?*'
