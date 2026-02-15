@@ -51,3 +51,11 @@ The tool will:
 
 The html files will still depend on `ans.app` assets such as css files (styling), javascript files (math rendering) and images.
 To fully archive the html file, its recommended to save them as pdf through either a browser of your choosing or through the steps below.
+
+1. Download a headless chrome browser for your os through `npx @puppeteer/browsers install chrome-headless-shell@stable` (npm/npx required to be in PATH)
+2. Run `uv run ./printing_html_files.py`.
+
+The following options can be passed or put in the `.env` file:
+
+- `BASE_PATH`/`--base-path`: Directory in which to search html files and print them.
+- `CHROME_EXECUTABLE`/`--chrome-executable`: Path to **headless** chrome executable, defaults to installation path of `npx @puppeteer/browsers install chrome-headess-shell@stable` in this directory.

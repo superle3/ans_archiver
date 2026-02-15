@@ -22,7 +22,7 @@ parser.add_argument(
     "--base-path",
     type=str,
     help="Base path to save the archived submissions. Defaults to './archive'.",
-    default=str(Path.cwd() / "archive"),
+    default=config.get("BASE_PATH", str(Path.cwd() / "archive")),
 )
 parser.add_argument(
     "--ans-token",

@@ -14,3 +14,4 @@ test_pdf
 .python-version
 uv.lock
 archive/*
+chrome-headless-shell
