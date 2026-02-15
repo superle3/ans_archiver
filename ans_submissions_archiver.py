@@ -34,10 +34,7 @@ def main():
         url = url.with_query({})
     logger.info(f"Using courses URL: {url}")
     courses_url = url.relative().with_query({})
-    # course_urls = get_list_of_courses(url, courses_url)
-    course_urls = [
-        CourseInfo(name="2mbc30", url=URL("https://ans.app/routing/courses/569252"))
-    ]
+    course_urls = get_list_of_courses(url, courses_url)
     if not course_urls:
         logger.error("No courses found.")
         return
