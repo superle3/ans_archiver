@@ -1,6 +1,6 @@
 [project]
 name = "ans-archiver"
-version = "0.2.1"
+version = "0.2.2"
 description = "Web-scraper for downloading assignment submissions from the ANS (ans.app) assesment platform."
 readme = "README.md"
 requires-python = "==3.12.*"
