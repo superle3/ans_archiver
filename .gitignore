@@ -15,3 +15,4 @@ test_pdf
 uv.lock
 archive/*
 chrome-headless-shell
+node_modules

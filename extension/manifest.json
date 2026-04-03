@@ -1,0 +1,38 @@
+{
+    "manifest_version": 3,
+    "name": "ANS archiver",
+    "version": "1.0",
+
+    "description": "Download your exams and answers as PDF from ANS.",
+
+    "content_scripts": [
+        {
+            "matches": ["*://*.ans.app/*"],
+            "js": ["dist/content.js"]
+        },
+        {
+            "matches": ["*://*.ans.app/*"],
+            "js": ["dist/world.js"],
+            "world": "MAIN"
+        }
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": ["node_modules/@bentopdf/pymupdf-wasm/assets/*"],
+            "matches": ["<all_urls>"]
+        }
+    ],
+    "background": {
+        "scripts": ["dist/background.js"]
+    },
+    "host_permissions": ["*://*.ans.app/"],
+    "permissions": ["cookies", "activeTab", "tabs", "<all_urls>"],
+    "browser_specific_settings": {
+        "gecko": {
+            "id": "ans@superlee",
+            "data_collection_permissions": {
+                "required": ["none"]
+            }
+        }
+    }
+}
