@@ -3,10 +3,13 @@ import { AnnotationFactory } from "annotpdf";
 import * as v from "valibot";
 import { loadPyMuPDF } from "./bentopdf/pymupdf-loader";
 import { PyMuPDFDocument } from "@bentopdf/pymupdf-wasm";
+import { Session } from "./session";
+import { progresElement, progress_callback } from "./world";
 
-export async function get_submission(url: URL, session: typeof fetch) {
+export type ProgressTypes = "add" | "complete";
+export async function get_submission(url: URL, session: Session) {
     //
-    const response = await session(url, { method: "GET" });
+    const response = await session.get(url);
     const content = await response.text();
     const parser = new DOMParser();
     const html = parser.parseFromString(content, "text/html");
@@ -28,59 +31,96 @@ export type PdfFileInfo = {
     content: Blob;
     directory: string;
 };
-export async function get_answers(url: URL, session: typeof fetch) {
+export const upgrade_types = {
+    attempt_pdf: "Attemps as pdfs",
+    attempt_html: "Attemps as html",
+    questions: "Questions",
+    courses: "Courses",
+    assignments: "Assignments",
+} as const;
+
+async function push_progress<T extends unknown>(
+    identifier: keyof typeof upgrade_types,
+    promise: Promise<T>,
+) {
+    console.trace();
+    update_progress_bar("add", identifier);
+    const result = await promise;
+    update_progress_bar("complete", identifier);
+    return result;
+}
+
+export function update_progress_bar(
+    type: ProgressTypes,
+    identifier: keyof typeof upgrade_types,
+) {
+    progress_callback(type, progresElement)({ detail: upgrade_types[identifier] });
+}
+
+export async function get_answers(url: URL, session: Session) {
     const url_no_query = new URL(url.pathname, url.origin);
-    const response = await session(url_no_query);
+    const response = await session.get(url_no_query);
     const parser = new DOMParser();
     const html = parser.parseFromString(await response.text(), "text/html");
     const tasks: Promise<FileInfo[] | FileInfo>[] = [];
-    tasks.push(download_questions(html, url_no_query, session));
+    tasks.push(
+        push_progress("questions", download_questions(html, url_no_query, session)),
+    );
     tasks.push(download_attempt(html, url_no_query, session));
     const files = (await Promise.all(tasks)).flat().filter((file) => !!file);
     return files;
 }
 
+async function download_pdf(
+    element: Element,
+    html: Document,
+    session: Session,
+): Promise<PdfFileInfo> {
+    const pdf_href = element.getAttribute("data-url")!;
+    const pdf_url = new URL(pdf_href);
+    const filename = pdf_url.searchParams.get("filename") ?? "attempt_scan.pdf";
+    const response = await session.get(pdf_url);
+    const raw_pdf_content = await response.blob();
+    const PyMuPDF = await loadPyMuPDF();
+    const pdf_doc = await PyMuPDF.open(raw_pdf_content);
+    const annotations = await get_annotations_from_html(html, pdf_url, session);
+    const annotated_pdf = annotate_pdf_pymudf(pdf_doc, annotations, html);
+    const content = annotated_pdf.saveAsBlob();
+    annotated_pdf.close();
+    return {
+        filename,
+        directory: "",
+        content,
+    };
+}
+
 async function download_attempt(
     html: Document,
     url: URL,
-    session: typeof fetch,
+    session: Session,
 ): Promise<FileInfo[]> {
-    const files: Promise<(PdfFileInfo & { url: URL }) | void>[] = [];
+    const files: Promise<PdfFileInfo | FileInfo>[] = [];
     html.querySelectorAll(
         'button[data-url][data-file-extension=".pdf"][data-file-type="pdf"]',
-    ).forEach((element) =>
-        files.push(
-            (async () => {
-                const pdf_href = element.getAttribute("data-url")!;
-                const pdf_url = new URL(pdf_href);
-                const filename = pdf_url.searchParams.get("filename") ?? "attempt.pdf";
-                const response = await session(pdf_url);
-                const content = await response.blob();
-                return {
-                    content,
-                    filename,
-                    directory: ".",
-                    url: pdf_url,
-                };
-            })(),
-        ),
-    );
-    const pdf_files = (await Promise.all(files)).filter((file) => !!file);
-    const annotated_pdf_files = pdf_files.map(async (file): Promise<PdfFileInfo> => {
-        const PyMuPDF = await loadPyMuPDF();
-        const pdf_doc = await PyMuPDF.open(file.content);
-        const annotations = await get_annotations_from_html(html, file.url, session);
-        const annotated_pdf = annotate_pdf_pymudf(pdf_doc, annotations, html);
-        const content = annotated_pdf.saveAsBlob();
-        annotated_pdf.close();
-        const { filename, directory } = file;
-        return {
-            filename,
-            directory,
-            content,
-        };
+    ).forEach((element) => {
+        const file = download_pdf(element, html, session);
+        files.push(push_progress("attempt_pdf", file));
     });
-    const fullfilled_pdfs = await Promise.all(annotated_pdf_files);
+    html.querySelectorAll("div[data-current-user-id][data-assignment-id]").forEach(
+        (element) => {
+            const file = async (): Promise<FileInfo> => {
+                const { main, page } = createAnswerHtml(html);
+                main.append(element);
+                return {
+                    content: page.documentElement.outerHTML,
+                    directory: "",
+                    filename: "attempt.html",
+                };
+            };
+            files.push(push_progress("attempt_html", file()));
+        },
+    );
+    const fullfilled_pdfs = await Promise.all(files);
     return fullfilled_pdfs;
 }
 
@@ -127,7 +167,6 @@ function annotate_pdf_pymudf(
         page.addTextAnnotation({ x, y }, text);
     }
     for (const drawing of drawings) {
-        console.log(1);
         const page_count = drawing.page;
         const width = drawing.width / 2;
 
@@ -269,7 +308,7 @@ type Annotation = v.InferOutput<typeof AnnotationSchema>;
 async function get_annotations_from_html(
     doc: Document,
     url: URL,
-    session: typeof fetch,
+    session: Session,
 ): Promise<Annotation> {
     /*
      <button type="button" class="mdc-tab mdc-tab--active" role="tab" aria-selected="true" tabindex="0" data-js-file-tab="" data-upload-id="24869267" data-url="https://d7e0acfd15964dc2a2412dbfcdebc202.objectstore.eu/ans/15-339077-794232%2Fexams%2F2004739-10225767.pdf?temp_url_sig=9b3b8be4c80ce35e668373c9e9c9cd8d8a5323fe&amp;temp_url_expires=1775255399&amp;filename=2004739-10225767-c5e496a8.pdf" data-file-type="pdf" data-file-extension=".pdf" data-downloadable="false" data-pages-with-annotations="[3,12,13,15,18,22,25,26]" data-rotation="0" data-mdc-auto-init="MDCTab" data-action="click-&gt;annotations-panel#clearPanel click-&gt;annotations-panel#showButton click-&gt;annotations#refreshPanel" data-page="[12,13,14]" data-position-start="26.3683"><span class="mdc-tab__content"><h2 class="f6 mdc-tab__text-label--truncate">Result</h2></span><span class="mdc-tab-indicator"><span class="mdc-tab-indicator__content mdc-tab-indicator__content--underline"></span></span><span class="mdc-tab__ripple"></span></button>
@@ -291,7 +330,7 @@ async function get_annotations_from_html(
     }
     const data_upload_id = annotation_html.getAttribute("data-upload-id")!;
     const request_url = new URL(`uploads/${data_upload_id}/annotations`, BASE_URL);
-    const response = await session(request_url);
+    const response = await session.get(request_url);
     try {
         const annotation_data = v.safeParse(AnnotationSchema, await response.json());
         if (annotation_data.success) {
@@ -312,7 +351,7 @@ async function get_annotations_from_html(
 async function download_questions(
     html: Document,
     url: URL,
-    session: typeof fetch,
+    session: Session,
 ): Promise<FileInfo> {
     const current_id = url.pathname.match(/\/(\d+)\/?$/)![1];
     const url_no_id = new URL(url.pathname.replace(/\/\d+\/?$/, "/"), url.origin);
@@ -332,7 +371,7 @@ async function download_questions(
                 return html;
             } else {
                 const url = new URL(link, url_no_id);
-                const response = await session(url, { method: "GET" });
+                const response = await session.get(url);
                 return parser.parseFromString(await response.text(), "text/html");
             }
         }),
@@ -352,17 +391,11 @@ async function download_questions(
         }
     });
     // body.append(main);
-    const i18n_temp_div = document.createElement("div");
-    i18n_temp_div.setAttribute("data-js-i18n", "");
-    i18n_temp_div.setAttribute("data-default-locale", "nl");
-    i18n_temp_div.setAttribute("data-locale", "nl");
-    const i18n = html.querySelector("div[data-js-i18n]") ?? i18n_temp_div;
-    body.append(i18n);
     // page.append(body);
     return {
         filename: "grading_panel.html",
         content: page.documentElement.outerHTML,
-        directory: ".",
+        directory: "",
     };
 }
 
@@ -416,6 +449,12 @@ function createAnswerHtml(htmlDoc: Document) {
             bodyTag.setAttribute(attr.name, attr.value);
         }
     }
+    const i18n_temp_div = document.createElement("div");
+    i18n_temp_div.setAttribute("data-js-i18n", "");
+    i18n_temp_div.setAttribute("data-default-locale", "nl");
+    i18n_temp_div.setAttribute("data-locale", "nl");
+    const i18n = htmlDoc.querySelector("div[data-js-i18n]") ?? i18n_temp_div;
+    bodyTag.append(i18n);
 
     // Return object matching AnswerHtml structure
     return {

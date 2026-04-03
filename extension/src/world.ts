@@ -1,6 +1,7 @@
 import { HrefResponse } from "./types";
-import { FileInfo, get_answers } from "./submissions";
+import { FileInfo, get_answers, ProgressTypes, update_progress_bar } from "./submissions";
 import { downloadZip } from "client-zip";
+import { Session } from "./session";
 
 declare global {
     var logger: {
@@ -39,71 +40,121 @@ function main(href: string) {
         }
     }, 100);
 }
+const DOWNLOAD_BUTTON_ID = "download_button_ans_archiver";
+const PROGRESS_ELEMENT_ID = "download_progress_ans_archiver";
+let progresses: Record<string, { [K in ProgressTypes]: number }> = {};
+export let progresElement: HTMLElement;
+export const progress_callback =
+    (type: ProgressTypes, el: Element) => (event: { detail: string }) => {
+        const detail = event.detail as string;
+        progresses[detail] = progresses[detail] ?? {
+            add: 0,
+            complete: 0,
+        };
+        progresses[detail][type] += 1;
+        const html =
+            "<ul>" +
+            Object.entries(progresses)
+                .map(([key, value]) => {
+                    return `<li> ${key}: ${value.complete}/${value.add}</li>`;
+                })
+                .join("") +
+            "</ul>";
+        el.innerHTML = html;
+    };
 function main_timeout(href: string) {
     if (
-        href.includes("results") ||
-        href.includes("grading/view") ||
-        href.includes("grading/go_to") ||
-        /\/assignments\/\d+(?!\/grading)/.test(href) ||
-        /\/assignments(?!\/\d+)/.test(href) ||
-        /\/courses\??/.test(href)
+        !(
+            href.includes("results") ||
+            href.includes("grading/view") ||
+            href.includes("grading/go_to") ||
+            /\/assignments\/\d+(?!\/grading)/.test(href) ||
+            /\/assignments(?!\/\d+)/.test(href) ||
+            /\/courses\??/.test(href)
+        )
     ) {
-        let downloadButton = document.getElementById("download_button");
-        if (!downloadButton) {
-            const toolbar = document.querySelector('section[role="toolbar"]')!;
-            downloadButton = document.createElement("button");
-            downloadButton.setAttribute(
-                "class",
-                "mdc-top-app-bar__action-item mdc-button mdc-button--white ml-2 ",
-            );
-            downloadButton.setAttribute("id", "download_button");
-            downloadButton.appendChild(document.createTextNode("Download"));
-            toolbar.appendChild(downloadButton);
-        }
-        downloadButton.addEventListener("click", async (event) => {
-            const files = await download_current_results(href);
-            const zipfile = await downloadZip(
-                files
-                    .filter((file) => !!file)
-                    .map((file) => ({
-                        name: joinPath(file.directory, file.filename),
-                        input: file.content,
-                    })),
-            ).blob();
-            const link = document.createElement("a");
-            const link_href = URL.createObjectURL(zipfile);
-            link.href = link_href;
-            link.download = "archive.zip";
-            link.click();
-            link.remove();
-            URL.revokeObjectURL(link_href);
-        });
+        return;
     }
+    let downloadButton = document.getElementById(DOWNLOAD_BUTTON_ID);
+    if (!downloadButton) {
+        const toolbar = document.querySelector('section[role="toolbar"]')!;
+        downloadButton = document.createElement("button");
+        downloadButton.setAttribute(
+            "class",
+            "mdc-top-app-bar__action-item mdc-button mdc-button--white ml-2 ",
+        );
+        downloadButton.setAttribute("id", DOWNLOAD_BUTTON_ID);
+        downloadButton.setAttribute("popovertarget", PROGRESS_ELEMENT_ID);
+        const a = 1 + 1;
+        // downloadButton.setAttribute("popovertargetaction", "show");
+        downloadButton.appendChild(document.createTextNode("Download"));
+        toolbar.appendChild(downloadButton);
+    }
+    let progressBar = document.getElementById(PROGRESS_ELEMENT_ID);
+    if (!progressBar) {
+        progressBar = document.createElement("div");
+        progressBar.setAttribute("id", PROGRESS_ELEMENT_ID);
+        progressBar.setAttribute("popover", "auto");
+        downloadButton.append(progressBar);
+        // progressBar.showPopover();
+    }
+    progresElement = progressBar;
+    let downloading = false;
+    downloadButton.addEventListener("click", async (event) => {
+        if (downloading) {
+            return;
+        }
+        progresses = {};
+        // progressBar.style.display = "inline";
+        downloading = true;
+        const session = new Session(BASE_URL);
+        const files = await download_current_results(href, document, session);
+        const zipfile = await downloadZip(
+            files
+                .filter((file) => !!file)
+                .map((file) => ({
+                    name: joinPath(file.directory, file.filename),
+                    input: file.content,
+                })),
+        ).blob();
+        const link = document.createElement("a");
+        const link_href = URL.createObjectURL(zipfile);
+        link.href = link_href;
+        link.download = "archive.zip";
+        // link.click();
+        link.remove();
+        URL.revokeObjectURL(link_href);
+        downloading = false;
+        // progressBar.hidePopover();
+    });
 }
-async function fetch_html(url: URL) {
-    const response = await fetch(url);
+async function fetch_html(url: URL, session: Session) {
+    const response = await session.get(url);
     const content = await response.text();
     const parser = new DOMParser();
     return parser.parseFromString(content, "text/html");
 }
 
-async function download_grading(doc: Document = document) {
+async function download_grading(doc: Document = document, session: Session) {
     const results_href = doc.querySelector('a[href*="/results/"]')?.getAttribute("href");
     if (!results_href) {
         return [];
     }
     const url = new URL(results_href, BASE_URL);
-    const html = await fetch_html(url);
-    return await download_results(html);
+    const html = await fetch_html(url, session);
+    return await download_results(html, session);
 }
 function joinPath(...paths: string[]): string {
     return paths.map((path) => path.replace(/^\/|\/?$/, "")).join("/");
 }
-async function download_results(doc: Document = document): Promise<FileInfo[]> {
+async function download_results(
+    doc: Document = document,
+    session: Session,
+): Promise<FileInfo[]> {
     const el = doc.querySelector('a[href*="/grading/"]');
     if (!el) return [];
     const url = new URL(el.getAttribute("href")!, BASE_URL);
-    const files = await download_answer(url);
+    const files = await download_answer(url, session);
     const dir = parse_title_from_results(doc);
     return files.map((file) => ({
         ...file,
@@ -113,20 +164,21 @@ async function download_results(doc: Document = document): Promise<FileInfo[]> {
 async function download_current_results(
     href: string,
     doc: Document = document,
+    session: Session,
 ): Promise<(FileInfo | void)[]> {
     href = new URL(href).pathname;
     if (href.startsWith("/results")) {
-        return download_results(doc);
+        return download_results(doc, session);
     } else if (href.startsWith("/digital_test/results")) {
-        return download_from_description(doc);
+        return download_from_description(doc, session);
     } else if (/assignments\/\d+(?!\/grading)/.test(href)) {
-        return await download_from_description(doc);
+        return await download_from_description(doc, session);
     } else if (/assignments(?!\/\d+)/.test(href)) {
-        return await download_from_assignments(doc);
+        return await download_from_assignments(doc, session);
     } else if (href.includes("grading/")) {
-        return await download_grading(doc);
+        return await download_grading(doc, session);
     } else if (href.endsWith("courses")) {
-        return await download_from_courses(doc);
+        return await download_from_courses(doc, session);
     } else if (href.startsWith("/digital_test/subsets")) {
         // not implemented
         return [];
@@ -143,7 +195,10 @@ function safe_parse_int(int: string): number | null {
         return null;
     }
 }
-async function download_from_courses(doc: Document = document): Promise<FileInfo[]> {
+async function download_from_courses(
+    doc: Document = document,
+    session: Session,
+): Promise<FileInfo[]> {
     const courses: string[] = [];
     let new_doc: Document = doc;
     while (true) {
@@ -161,12 +216,15 @@ async function download_from_courses(doc: Document = document): Promise<FileInfo
             break;
         }
         const url = new URL(more_pages_href, BASE_URL);
-        new_doc = await fetch_html(url);
+        new_doc = await fetch_html(url, session);
     }
     const files = await Promise.all(
         Array.from(new Set(courses)).map(async (course) => {
-            const html = await fetch_html(new URL(course));
-            return await download_from_assignments(html);
+            update_progress_bar("add", "courses");
+            const html = await fetch_html(new URL(course), session);
+            const result = await download_from_assignments(html, session);
+            update_progress_bar("complete", "courses");
+            return result;
         }),
     );
     return files.flat().filter((file) => !!file);
@@ -194,19 +252,26 @@ function sanitize_directories(dirs: string[]): string[] {
     return dirs.map((dir) => sanitize_directory(dir));
 }
 
-async function download_from_assignments(doc: Document) {
+async function download_from_assignments(doc: Document, session: Session) {
     const files: Promise<(FileInfo | void)[]>[] = [];
     doc.querySelectorAll('a[href*="/go_to"').forEach((el) =>
         files.push(
             (async () => {
+                update_progress_bar("add", "assignments");
                 const href = el.getAttribute("href")!;
                 const url = new URL(href, BASE_URL);
-                const response = await fetch(url);
+                const response = await session.get(url);
                 const content = await response.text();
                 const parser = new DOMParser();
                 const new_doc = parser.parseFromString(content, "text/html");
                 console.log(response.url);
-                return await download_current_results(response.url, new_doc);
+                const files = await download_current_results(
+                    response.url,
+                    new_doc,
+                    session,
+                );
+                update_progress_bar("complete", "assignments");
+                return files;
             })(),
         ),
     );
@@ -216,27 +281,22 @@ async function download_from_assignments(doc: Document) {
     });
 }
 
-async function download_from_description(doc: Document = document) {
+async function download_from_description(doc: Document = document, session: Session) {
     const el = doc.querySelector('a[href*="/results/"');
     const href = el?.getAttribute("href");
     if (!href) {
         return [];
     }
     const results_href = new URL(href, BASE_URL);
-    const response = await fetch(results_href);
+    const response = await session.get(results_href);
     const content = await response.text();
     const parser = new DOMParser();
     const new_doc = parser.parseFromString(content, "text/html");
-    return await download_current_results(results_href.href, new_doc);
+    return await download_current_results(results_href.href, new_doc, session);
 }
 // console.log(answers[0]);
-async function download_answer(url: URL) {
-    return await get_answers(
-        new URL(url.href),
-        async (arg1: URL | RequestInfo, arg2?: RequestInit) => {
-            return await fetch(arg1, arg2);
-        },
-    );
+async function download_answer(url: URL, session: Session) {
+    return await get_answers(new URL(url.href), session);
 }
 
 console.log(2);

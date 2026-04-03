@@ -10,6 +10,13 @@ const PROGRESS_ELEMENT_ID = "download_progress_ans_archiver";
 #download_progress_ans_archiver {
     position-anchor: --ans-archiver;
     position: absolute;
-    position-area: bottom span-left;
+    position-area: bottom span-all;
     border-color: green;
+}
+
+div#download_progress_ans_archiver > ul {
+    list-style-position: inside;
+}
+div#download_progress_ans_archiver > ul > li {
+    display: list-item;
 }
