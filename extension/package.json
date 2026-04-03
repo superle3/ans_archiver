@@ -12,6 +12,7 @@
         "run": "web-ext run"
     },
     "devDependencies": {
+        "@sprout2000/esbuild-copy-plugin": "^1.1.19",
         "@types/webextension-polyfill": "^0.12.5",
         "concurrently": "^9.2.1",
         "esbuild": "^0.27.4",

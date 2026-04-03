@@ -3,7 +3,7 @@
         "strict": true,
         "lib": ["ES2022", "DOM"],
         "esModuleInterop": true,
-        "types": ["node_modules/@types", "node_modules/web-ext-option-types"]
+        "types": []
     },
     "exclude": ["dist/*.js"]
 }

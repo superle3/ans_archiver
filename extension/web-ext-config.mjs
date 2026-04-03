@@ -1,3 +1,5 @@
+/// <reference types="node"  />
+/// <reference types="web-ext-option-types"  />
 /** @type {import('web-ext-option-types').BuildOptions} */
 const build = {
     filename: "ans_archiver.zip",
