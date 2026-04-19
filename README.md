@@ -15,16 +15,16 @@ All commands are executed in the root of the project and all files are created i
 Create a `.env` file with or pass them into the cli options as:
 
 - `ANS_TOKEN`/`--ans-token`: Your ANS session token.
- When you're logged into `ans.app`, open up developer tools with `Ctrl+Shift+I` or `Ctrl+Shift+C` and window like the following below should pop up:
- ![open up developer tools](images/developer_tools.png)
- Then you select the network tab, if its not there like in the image above, click on the arrow and click on `Network` to get like below:
- ![go to the network tab](images/deverloper_tools_network.png)
+  When you're logged into `ans.app`, open up developer tools with `Ctrl+Shift+I` or `Ctrl+Shift+C` and window like the following below should pop up:
+  ![open up developer tools](images/developer_tools.png)
+  Then you select the network tab, if its not there like in the image above, click on the arrow and click on `Network` to get like below:
+  ![go to the network tab](images/deverloper_tools_network.png)
 
- 1. Filter the output to only `ans.app`
- 2. select the top one, below select `Headers`
- 3. Scroll all the way down beyond `Request Headers`
- 4. Copy everything in `set-cookie` from the response headers.
- ![get cookie](images/get_cookie.png)
+1.  Filter the output to only `ans.app`
+2.  select the top one, below select `Headers`
+3.  Scroll all the way down beyond `Request Headers`
+4.  Copy everything in `set-cookie` from the response headers.
+    ![get cookie](images/get_cookie.png)
 
 - `BASE_PATH`/`--base-path`: Directory to save archives (optional, defaults to "archive" in this directory).
 - `YEAR`/`--year`: The year(s) which will be downloaded. `all` will download all available years, `2023` will download all assignments from study year `2023` and `latest` will download the current year. This defaults to `latest`.
@@ -40,7 +40,7 @@ BASE_PATH="C:/Users/username/Documents/school/ans_archive"
 
 And you could run it with: `uv run ./ans_submissions_archiver.py --year 2025 --grading-scheme old`.
 
->[!NOTE]
+> [!NOTE]
 > Command line options will take priority over the variables in the `.env` file.
 
 ## Usage
@@ -61,7 +61,7 @@ The following options can be passed or put in the `.env` file:
 - `BASE_PATH`/`--base-path`: Directory in which to search html files and print them.
 - `CHROME_EXECUTABLE`/`--chrome-executable`: Path to **headless** chrome executable, defaults to installation path of `npx @puppeteer/browsers install chrome-headess-shell@stable` in this directory.
 
->[!NOTE]
+> [!NOTE]
 > Other python virtual environment managers that adhere to the `pyproject.toml` spec should work too, but uv is recommended for its ease of use.
 
 ## Troubleshooting
@@ -77,3 +77,7 @@ The following options can be passed or put in the `.env` file:
 All contributions are welcome. If the webscraper is broken for a particular page, you can either save that page in the code or open the url in the browser, go to `Networks`, inspect the broken url and check the response tab for the initial html of that url and finally you can inspect that html in a code editor to see what possible changes need to be made.
 
 If you like this project, consider leaving a star.
+
+## License
+
+The source code of this project falls under the [MIT](LICENSE), but it uses libraries with license AGPLv3 (thus a fully distributed version of this falls under AGPLv3).
