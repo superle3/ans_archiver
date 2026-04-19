@@ -9,7 +9,7 @@ import aiohttp
 import bs4
 from colorama import Fore, init
 from yarl import URL
-from python.src.parser import ANS_TOKEN, BASE_PATH, BASE_URL, SESSION, YEAR
+from python.src.parser import ANS_TOKEN, BASE_PATH, BASE_URL, DEFAULT_HEADERS, SESSION, YEAR
 from python.src.submissions import get_submission
 from python.src.throttledclientsession import RateLimitMiddleware
 from python.src.utils import sanitize_filename
@@ -45,7 +45,10 @@ def main():
         nonlocal course_urls
         nonlocal courses_url
         throttle_middleware = RateLimitMiddleware(rate_limit=10, jitter_factor=0)
-        async with aiohttp.ClientSession(middlewares=[throttle_middleware]) as async_session:
+        # ans.app seems to reject requests otherwise.
+        async with aiohttp.ClientSession(
+            middlewares=[throttle_middleware], headers=DEFAULT_HEADERS
+        ) as async_session:
             async_session.cookie_jar.update_cookies(
                 {"__Host-ans_session": ANS_TOKEN}, response_url=BASE_URL
             )

@@ -59,12 +59,13 @@ class Arguments:
 
 
 def parse_ans_token(token: str) -> str:
-    if token.find("__Host-ans_session=") != -1:
-        start = token.find("__Host-ans_session=") + len("__Host-ans_session=")
+    token = token.strip().strip('"').strip("'")
+    marker = "__Host-ans_session="
+    if marker in token:
+        start = token.find(marker) + len(marker)
         end = token.find(";", start)
-        return token[start:end]
-    else:
-        return token.split(";")[0]
+        return token[start:] if end == -1 else token[start:end]
+    return token.split(";", 1)[0]
 
 
 args = parser.parse_args(namespace=Arguments())
@@ -90,8 +91,13 @@ GRADING_SCHEME = args.grading_scheme
 SESSION = URLSession()
 
 BASE_URL = URL("https://ans.app/")
-# Add the authorization cookie
-SESSION.cookies.set("__Host-ans_session", ANS_TOKEN, domain="ans.app")
+DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+}
+SESSION.headers.update(DEFAULT_HEADERS)
+
+# Keep cookie names aligned with browser traffic.
+SESSION.cookies.set("__Host-ans_session", ANS_TOKEN, domain="ans.app", path="/")
 
 logger = logging.getLogger("ans_archiver")
 stream_handler = logging.StreamHandler(sys.stdout)
