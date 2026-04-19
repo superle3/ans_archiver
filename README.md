@@ -6,9 +6,19 @@ A web scraper for downloading assignment submissions and corrections from the AN
 
 All commands are executed in the root of the project and all files are created in the root of the project. (root of the project=same folder as the file `pyproject.toml` is in.)
 
-1. Clone the repository or download the zip file and .
-2. Install the packages with [uv](https://docs.astral.sh/uv/) and run `uv sync`.
-3. Set up environment variables in a `.env` file.
+1. With either [pipx](https://pipx.pypa.io/stable/) or [uvx](https://docs.astral.sh/uv/guides/tools/) run the following
+
+```bash
+# uvx or uv tool install
+uvx --from git+https://github.com/superle3/ans_archiver.git --python 3.12
+```
+
+```bash
+#pipx
+pipx install git+https://github.com/superle3/ans_archiver.git --python 3.12
+```
+
+2. Setup environment variables in a `.env` file.
 
 ## Configuration
 
@@ -38,7 +48,7 @@ ANS_TOKEN="sso_name=<insert-institution-name>; sso_method=get; __Host-ans_sessio
 BASE_PATH="C:/Users/username/Documents/school/ans_archive"
 ```
 
-And you could run it with: `uv run ./ans_submissions_archiver.py --year 2025 --grading-scheme old`.
+And you could run it with: `ans_submissions_archiver --year 2025 --grading-scheme old`.
 
 > [!NOTE]
 > Command line options will take priority over the variables in the `.env` file.
@@ -54,15 +64,12 @@ The html files will still depend on `ans.app` assets such as css files (styling)
 To fully archive the html file, its recommended to save them as pdf through either a browser of your choosing or through the steps below.
 
 1. Download a headless chrome browser for your os through `npx @puppeteer/browsers install chrome-headless-shell@stable` (npm/npx required to be in PATH)
-2. Run `uv run ./printing_html_files.py`.
+2. Run `ans-archiver-print`.
 
 The following options can be passed or put in the `.env` file:
 
 - `BASE_PATH`/`--base-path`: Directory in which to search html files and print them.
 - `CHROME_EXECUTABLE`/`--chrome-executable`: Path to **headless** chrome executable, defaults to installation path of `npx @puppeteer/browsers install chrome-headess-shell@stable` in this directory.
-
-> [!NOTE]
-> Other python virtual environment managers that adhere to the `pyproject.toml` spec should work too, but uv is recommended for its ease of use.
 
 ## Troubleshooting
 
