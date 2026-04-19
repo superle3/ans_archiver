@@ -9,10 +9,10 @@ import aiohttp
 import bs4
 from colorama import Fore, init
 from yarl import URL
-from src.parser import ANS_TOKEN, BASE_PATH, BASE_URL, SESSION, YEAR
-from src.submissions import get_submission
-from src.throttledclientsession import RateLimitMiddleware
-from src.utils import sanitize_filename
+from python.src.parser import ANS_TOKEN, BASE_PATH, BASE_URL, SESSION, YEAR
+from python.src.submissions import get_submission
+from python.src.throttledclientsession import RateLimitMiddleware
+from python.src.utils import sanitize_filename
 
 init(autoreset=True)
 
@@ -45,17 +45,13 @@ def main():
         nonlocal course_urls
         nonlocal courses_url
         throttle_middleware = RateLimitMiddleware(rate_limit=10, jitter_factor=0)
-        async with aiohttp.ClientSession(
-            middlewares=[throttle_middleware]
-        ) as async_session:
+        async with aiohttp.ClientSession(middlewares=[throttle_middleware]) as async_session:
             async_session.cookie_jar.update_cookies(
                 {"__Host-ans_session": ANS_TOKEN}, response_url=BASE_URL
             )
             await asyncio.gather(
                 *[
-                    get_assignments_from_course(
-                        course_url, async_session, courses_url, BASE_PATH
-                    )
+                    get_assignments_from_course(course_url, async_session, courses_url, BASE_PATH)
                     for course_url in course_urls
                 ]
             )
@@ -87,16 +83,12 @@ async def get_assignments_from_course(
     courses_url: URL,
     base_path: Path,
 ) -> None:
-    logger.debug(
-        f"Getting assignments for course {course_info.name} from {course_info.url}."
-    )
+    logger.debug(f"Getting assignments for course {course_info.name} from {course_info.url}.")
     results = await async_session.get(course_info.url)
     content = await results.text()
     html_soup = bs4.BeautifulSoup(content, "html.parser")
     assignment_infos: list[AssignmentInfo] = [
-        AssignmentInfo(
-            assignment_name=a.text.strip(), course_name=course_info.name, url=URL(href)
-        )
+        AssignmentInfo(assignment_name=a.text.strip(), course_name=course_info.name, url=URL(href))
         for a in html_soup.find_all("a")
         if isinstance(href := a.get("href"), str)
         and href.startswith(str(courses_url))
@@ -108,9 +100,7 @@ async def get_assignments_from_course(
     )
     assignment_texts = await asyncio.gather(*[a.text() for a in assignments])
     submission_tasks: list[None | Coroutine] = [None] * len(assignment_texts)
-    logger.debug(
-        f"Found {len(assignment_infos)} assignments for course {course_info.name}."
-    )
+    logger.debug(f"Found {len(assignment_infos)} assignments for course {course_info.name}.")
 
     for i, (content, info) in enumerate(zip(assignment_texts, assignment_infos)):
         assignment_soup = bs4.BeautifulSoup(content, "html.parser")
@@ -147,8 +137,7 @@ def get_list_of_courses(url: URL, courses_url: URL) -> CourseInfos:
         courses: CourseInfos = [
             CourseInfo(name=a.text.strip(), url=BASE_URL.join(URL(href)))
             for a in html_soup.find_all("a")
-            if isinstance(href := a.get("href"), str)
-            and href.startswith("/routing/courses/")
+            if isinstance(href := a.get("href"), str) and href.startswith("/routing/courses/")
         ]
         next_page = [
             BASE_URL.join(URL(href))
@@ -183,9 +172,7 @@ def get_navigation() -> URL:
         raise ValueError("No navigation link found.")
     if len(navigation_link) > 1:
         logger.warning(
-            Fore.YELLOW
-            + "Multiple navigation links found, taking the first one."
-            + Fore.RESET
+            Fore.YELLOW + "Multiple navigation links found, taking the first one." + Fore.RESET
         )
     navigation_url = navigation_link[0]
     # .with_query({})

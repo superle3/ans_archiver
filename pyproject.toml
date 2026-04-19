@@ -1,3 +1,8 @@
+[build-system]
+requires = ["uv_build>=0.11.7"]
+build-backend = "uv_build"
+
+
 [project]
 name = "ans-archiver"
 version = "0.2.2"
@@ -15,11 +20,18 @@ dependencies = [
     "requests>=2.32.5",
     "yarl>=1.22.0",
 ]
+[project.scripts]
+    ans-archiver = "python.ans_submissions_archiver:main"
+    ans-archiver-print = "python.printing_html_files:main"
 
 [tool.pyright]
-exclude = ["archive", "test-html" ,"test_pdf", "images"]
+include = ["python/**/*.py"]
 
 [dependency-groups]
 dev = [
     "debugpy>=1.8.17",
 ]
+
+[tool.uv.build-backend]
+module-name = "python"
+module-root=""
