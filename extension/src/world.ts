@@ -1,8 +1,15 @@
 import { HrefResponse } from "./types";
-import { FileInfo, get_answers, ProgressTypes, update_progress_bar } from "./submissions";
+import {
+    FileInfo,
+    get_answers,
+    HTMLFileInfo,
+    PdfFileInfo,
+    ProgressTypes,
+    update_progress_bar,
+} from "./submissions";
 import { downloadZip } from "client-zip";
 import { Session } from "./session";
-
+import { print_document } from "./browser/print";
 declare global {
     var logger: {
         debug: (...msg: string[]) => void;
@@ -108,9 +115,11 @@ function main_timeout(href: string) {
         // progressBar.style.display = "inline";
         downloading = true;
         const session = new Session(BASE_URL);
-        const files = await download_current_results(href, document, session);
+        const fetched_files = await download_current_results(href, document, session);
+        const all_files = await print_html_files(fetched_files);
+
         const zipfile = await downloadZip(
-            files
+            all_files
                 .filter((file) => !!file)
                 .map((file) => ({
                     name: joinPath(file.directory, file.filename),
@@ -121,12 +130,33 @@ function main_timeout(href: string) {
         const link_href = URL.createObjectURL(zipfile);
         link.href = link_href;
         link.download = "archive.zip";
-        // link.click();
+        link.click();
         link.remove();
         URL.revokeObjectURL(link_href);
         downloading = false;
-        // progressBar.hidePopover();
+        progressBar.hidePopover();
     });
+}
+async function print_html_files(files: FileInfo[]) {
+    const html_files = files.filter((file) =>
+        file.filename.endsWith(".html"),
+    ) as HTMLFileInfo[];
+    const printed_files: Array<PdfFileInfo | void> = await Promise.all(
+        html_files.map(async (file) => {
+            try {
+                const pdf_file = await print_document(file.content);
+                if (pdf_file) {
+                    pdf_file.filename = file.filename.replace(
+                        ".html",
+                        ".pdf",
+                    ) as PdfFileInfo["filename"];
+                    pdf_file.directory = file.directory;
+                    return pdf_file;
+                }
+            } catch {}
+        }),
+    );
+    return [...printed_files.filter((file) => !!file), ...files];
 }
 async function fetch_html(url: URL, session: Session) {
     const response = await session.get(url);
@@ -165,12 +195,13 @@ async function download_current_results(
     href: string,
     doc: Document = document,
     session: Session,
-): Promise<(FileInfo | void)[]> {
+): Promise<FileInfo[]> {
     href = new URL(href).pathname;
+    let files: FileInfo[] = [];
     if (href.startsWith("/results")) {
-        return download_results(doc, session);
+        return await download_results(doc, session);
     } else if (href.startsWith("/digital_test/results")) {
-        return download_from_description(doc, session);
+        return await download_from_description(doc, session);
     } else if (/assignments\/\d+(?!\/grading)/.test(href)) {
         return await download_from_description(doc, session);
     } else if (/assignments(?!\/\d+)/.test(href)) {
@@ -186,6 +217,7 @@ async function download_current_results(
         console.error(`url not implemented href=${href}`);
         return [];
     }
+    return [...files, ...files_with_pdfs];
 }
 
 function safe_parse_int(int: string): number | null {
@@ -276,9 +308,7 @@ async function download_from_assignments(doc: Document, session: Session) {
         ),
     );
     const await_files = await Promise.all(files);
-    return await_files.flat().filter((file) => {
-        return file;
-    });
+    return await_files.flat().filter((file) => !!file);
 }
 
 async function download_from_description(doc: Document = document, session: Session) {
@@ -299,7 +329,6 @@ async function download_answer(url: URL, session: Session) {
     return await get_answers(new URL(url.href), session);
 }
 
-console.log(2);
 window.addEventListener("popstate", (event) => {
     const href = window.location.href;
     logger.info(href);

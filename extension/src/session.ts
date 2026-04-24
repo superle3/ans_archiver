@@ -2,10 +2,8 @@ export class Session {
     base_url: URL;
     default_headers: HeadersInit;
     ready: Promise<void> = Promise.resolve();
-    delay_ms: number = 100;
+    delay_ms: number = 10;
     last_request_time: number = 0;
-    request_num: number = 0;
-    uuid: string = Math.random().toString(36).substring(2, 15);
     constructor(base_url: string | URL, default_headers: HeadersInit = {}) {
         this.base_url = typeof base_url === "string" ? new URL(base_url) : base_url;
         this.default_headers = default_headers;
@@ -30,8 +28,6 @@ export class Session {
         });
         await this.ready;
         this.last_request_time = performance.now();
-        this.request_num += 1;
-        console.log("request num", this.request_num, this.uuid);
         const url = new URL(endpoint, this.base_url);
         const merge_headers = new Headers(this.default_headers);
         if (options.headers) {

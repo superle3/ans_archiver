@@ -1,5 +1,5 @@
 import { PyMuPDF } from "@bentopdf/pymupdf-wasm";
-import { WasmAssetEvent } from "../content";
+import { WasmAssetEvent } from "../content/content";
 
 let cachedPyMuPDF: PyMuPDF | null = null;
 let loadPromise: Promise<PyMuPDF> | null = null;
@@ -17,13 +17,9 @@ export async function loadPyMuPDF(): Promise<PyMuPDF> {
         try {
             const url: string = await new Promise((resolve) => {
                 const callback = (event: WasmAssetEvent) => {
-                    console.log(event, event.detail);
                     resolve(event.detail);
                 };
-                const listener = window.addEventListener(
-                    "ans_archive_load",
-                    callback as EventListener,
-                );
+                window.addEventListener("ans_archive_load", callback as EventListener);
                 window.dispatchEvent(new CustomEvent("ans_archive_start"));
                 window.removeEventListener("ans_archive_load", callback as EventListener);
             });

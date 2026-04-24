@@ -8,7 +8,7 @@
     "content_scripts": [
         {
             "matches": ["*://ans.app/*"],
-            "js": ["dist/content.js"]
+            "js": ["dist/content/content.js"]
         },
         {
             "matches": ["*://ans.app/*"],
@@ -18,19 +18,39 @@
         {
             "matches": ["*://ans.app/*"],
             "css": ["dist/styles.css"]
+        },
+        {
+            "matches": ["*://ans.app/?print_pdf=true*"],
+            "js": ["dist/content/replacing_content.js"]
         }
     ],
     "web_accessible_resources": [
         {
             "resources": ["node_modules/@bentopdf/pymupdf-wasm/assets/*"],
             "matches": ["<all_urls>"]
+        },
+        {
+            "resources": ["page.html"],
+            "matches": ["<all_urls>"]
         }
     ],
     "background": {
-        "scripts": ["dist/background.js"]
+        "scripts": ["dist/background.js"],
+        "service_worker": "dist/background.js"
     },
-    "host_permissions": ["*://*.ans.app/"],
-    "permissions": ["cookies", "activeTab", "tabs", "<all_urls>"],
+    "host_permissions": [
+        "*://*.ans.app/",
+        "chrome-extension://*/page.html",
+        "<all_urls>"
+    ],
+    "permissions": [
+        "cookies",
+        "activeTab",
+        "tabs",
+        "<all_urls>",
+        "debugger",
+        "scripting"
+    ],
     "browser_specific_settings": {
         "gecko": {
             "id": "ans@superlee",
