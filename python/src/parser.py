@@ -46,6 +46,13 @@ parser.add_argument(
     default=config.get("LOG_LEVEL", "INFO"),
 )
 
+parser.add_argument(
+    "--user-agent",
+    type=str,
+    help="User-Agent associated with the ans token. Authentication won't work otherwise",
+    default=config.get("USER_AGENT", None),
+)
+
 type GradingScheme = Literal["old", "new", "current"]
 grading_schemes = get_args(GradingScheme.__value__)
 
@@ -56,6 +63,7 @@ class Arguments:
     year: str | Literal["latest", "all"]
     grading_scheme: GradingScheme = "current"
     log_level: str
+    user_agent: str
 
 
 def parse_ans_token(token: str) -> str:
@@ -85,15 +93,19 @@ if args.grading_scheme not in grading_schemes:
     raise ValueError(
         f"Invalid grading scheme '{args.grading_scheme}'. Must be one of {grading_schemes}. `.env` file was: {config}."
     )
+if args.user_agent:
+    USER_AGENT = args.user_agent
+else:
+    raise ValueError(
+        f"USER_AGENT not found in environment variables, found {args.user_agent} and .env file was: {config}, user agent is required for authentication to work."
+    )
 GRADING_SCHEME = args.grading_scheme
 
 
 SESSION = URLSession()
 
 BASE_URL = URL("https://ans.app/")
-DEFAULT_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-}
+DEFAULT_HEADERS = {"User-Agent": USER_AGENT}
 SESSION.headers.update(DEFAULT_HEADERS)
 
 # Keep cookie names aligned with browser traffic.
