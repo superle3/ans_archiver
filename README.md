@@ -36,7 +36,7 @@ Create a `.env` file with or pass them into the cli options as:
 4.  Copy everything in `set-cookie` from the response headers.
     ![get cookie](images/get_cookie.png)
 
-- `USER_AGENT`/`--user-agent`: User-Agent header that is associated witht he `ANS_TOKEN`, ans has updated their authentication policy, associating the user-agent with the session token. If they are not the same, authentication won't work. It can be found in the same tab as for `ANS_TOKEN` only you have to scroll down to the `Request Headers` and it will be in one of these headers.
+- `USER_AGENT`/`--user-agent`: User-Agent header that is associated witht he `ANS_TOKEN`, ans has updated their authentication policy, associating the user-agent with the session token. If they are not the same, authentication won't work. It can be found in the same tab as for `ANS_TOKEN` only you have to scroll down to the `Request Headers` and it will be in the `User-Agent` header.
 - `BASE_PATH`/`--base-path`: Directory to save archives (optional, defaults to "archive" in this directory).
 - `YEAR`/`--year`: The year(s) which will be downloaded. `all` will download all available years, `2023` will download all assignments from study year `2023` and `latest` will download the current year. This defaults to `latest`.
 - `GRADING_SCHEME`/`--grading-scheme`: Whether to use the old grading scheme or the new one, defaults to the current one. Options are `old`, `new` and `current`.
