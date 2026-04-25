@@ -10,7 +10,7 @@ All commands are executed in the root of the project and all files are created i
 
 ```bash
 # uvx or uv tool install
-uvx --from git+https://github.com/superle3/ans_archiver.git --python 3.12
+uv tool install --from git+https://github.com/superle3/ans_archiver.git --python 3.12
 ```
 
 ```bash
